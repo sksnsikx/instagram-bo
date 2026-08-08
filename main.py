@@ -52,7 +52,7 @@ def get_driver():
     options.add_argument("--user-agent=Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.0.0 Safari/537.36")
     options.add_experimental_option("excludeSwitches", ["enable-automation"])
     options.add_experimental_option("useAutomationExtension", False)
-    options.page_load_strategy = 'eager'  # لود سریع‌تر صفحه
+    options.page_load_strategy = 'eager'
     service = Service(ChromeDriverManager().install())
     driver = webdriver.Chrome(service=service, options=options)
     driver.execute_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
@@ -82,6 +82,19 @@ async def send_screenshot(update, driver, caption):
     else:
         await update.message.reply_text(f"⚠️ اسکرین‌شات گرفته نشد: {caption}")
 
+def find_element_with_multiple_selectors(driver, selectors, timeout=10):
+    for by, selector in selectors:
+        try:
+            element = WebDriverWait(driver, timeout).until(
+                EC.presence_of_element_located((by, selector))
+            )
+            logger.info(f"✅ المنت با selector '{selector}' پیدا شد.")
+            return element
+        except Exception as e:
+            logger.warning(f"⚠️ selector '{selector}' کار نکرد: {str(e)[:50]}")
+            continue
+    return None
+
 async def start_registration(update, email, password, username_prefix="user"):
     logger.info(f"📧 شروع ثبت‌نام با ایمیل: {email}")
     driver = None
@@ -91,23 +104,52 @@ async def start_registration(update, email, password, username_prefix="user"):
         logger.info("🌐 باز کردن صفحه ثبت‌نام اینستاگرام...")
         driver.get("https://www.instagram.com/accounts/emailsignup/")
         
-        wait = WebDriverWait(driver, 45)
+        wait = WebDriverWait(driver, 60)
         
         # ===== پیدا کردن فیلد ایمیل =====
         logger.info("🔍 جستجوی فیلد ایمیل...")
-        email_input = wait.until(EC.presence_of_element_located((By.NAME, "emailOrPhone")))
+        email_selectors = [
+            (By.NAME, "emailOrPhone"),
+            (By.CSS_SELECTOR, "input[name='emailOrPhone']"),
+            (By.XPATH, "//input[@name='emailOrPhone']"),
+            (By.XPATH, "//input[@type='email' or @name='emailOrPhone']"),
+        ]
+        email_input = find_element_with_multiple_selectors(driver, email_selectors, timeout=60)
+        
+        if not email_input:
+            inputs = driver.find_elements(By.TAG_NAME, "input")
+            for inp in inputs:
+                try:
+                    name = inp.get_attribute("name")
+                    if name in ["emailOrPhone", "email"]:
+                        email_input = inp
+                        logger.info(f"✅ فیلد ایمیل با name='{name}' پیدا شد.")
+                        break
+                except:
+                    pass
+        
+        if not email_input:
+            await send_screenshot(update, driver, "❌ فیلد ایمیل پیدا نشد! صفحه را ببینید.")
+            inputs = driver.find_elements(By.TAG_NAME, "input")
+            logger.info(f"📋 تعداد input های صفحه: {len(inputs)}")
+            for inp in inputs:
+                try:
+                    logger.info(f"   - name: {inp.get_attribute('name')}, type: {inp.get_attribute('type')}")
+                except:
+                    pass
+            raise Exception("فیلد ایمیل پیدا نشد. صفحه ممکن است تغییر کرده باشد.")
+        
         email_input.clear()
         email_input.send_keys(email)
         logger.info("✅ فیلد ایمیل پر شد.")
         
-        # ===== پیدا کردن فیلد رمز عبور =====
+        # ===== سایر فیلدها =====
         logger.info("🔍 جستجوی فیلد رمز عبور...")
         password_input = wait.until(EC.presence_of_element_located((By.NAME, "password")))
         password_input.clear()
         password_input.send_keys(password)
         logger.info("✅ فیلد رمز عبور پر شد.")
         
-        # ===== پیدا کردن فیلد نام کامل =====
         logger.info("🔍 جستجوی فیلد نام کامل...")
         full_name_input = wait.until(EC.presence_of_element_located((By.NAME, "fullName")))
         full_name_input.clear()
@@ -115,7 +157,6 @@ async def start_registration(update, email, password, username_prefix="user"):
         full_name_input.send_keys(full_name)
         logger.info(f"✅ فیلد نام کامل پر شد: {full_name}")
         
-        # ===== پیدا کردن فیلد نام کاربری =====
         logger.info("🔍 جستجوی فیلد نام کاربری...")
         username_input = wait.until(EC.presence_of_element_located((By.NAME, "username")))
         username_input.clear()
@@ -126,7 +167,7 @@ async def start_registration(update, email, password, username_prefix="user"):
         # ارسال اسکرین‌شات مرحله ۱
         await send_screenshot(update, driver, "📝 مرحله ۱: فرم پر شد، در حال ارسال به اینستاگرام...")
         
-        # ===== پیدا کردن دکمه Submit =====
+        # ===== دکمه Submit =====
         logger.info("🖱️ جستجوی دکمه ارسال...")
         submit_button = wait.until(EC.element_to_be_clickable((By.XPATH, "//div[@role='button']//span[text()='Submit']/..")))
         submit_button.click()
@@ -165,7 +206,7 @@ async def start_registration(update, email, password, username_prefix="user"):
 def submit_confirmation_code(driver, code):
     logger.info(f"🔢 ارسال کد تأیید: {code}")
     try:
-        wait = WebDriverWait(driver, 45)
+        wait = WebDriverWait(driver, 60)
         code_input = wait.until(EC.presence_of_element_located((By.NAME, "code")))
         code_input.clear()
         code_input.send_keys(code)
