@@ -52,6 +52,8 @@ def get_driver():
     options.add_argument("--user-agent=Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.0.0 Safari/537.36")
     options.add_experimental_option("excludeSwitches", ["enable-automation"])
     options.add_experimental_option("useAutomationExtension", False)
+    # تنظیم pageLoadStrategy برای لود سریع‌تر
+    options.page_load_strategy = 'eager'  # منتظر DOMContentLoaded می‌ماند نه کل صفحه
     service = Service(ChromeDriverManager().install())
     driver = webdriver.Chrome(service=service, options=options)
     driver.execute_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
@@ -90,11 +92,12 @@ async def start_registration(update, email, password, username_prefix="user"):
         logger.info("🌐 باز کردن صفحه ثبت‌نام اینستاگرام...")
         driver.get("https://www.instagram.com/accounts/emailsignup/")
         
-        # استفاده از WebDriverWait با timeout 30 ثانیه
-        wait = WebDriverWait(driver, 30)
+        # صبر برای لود شدن کامل صفحه (10 ثانیه)
+        logger.info("⏳ منتظر لود شدن کامل صفحه...")
+        time.sleep(10)
         
-        # صبر برای لود شدن کامل صفحه
-        time.sleep(5)
+        # استفاده از WebDriverWait با timeout 60 ثانیه
+        wait = WebDriverWait(driver, 60)
         
         # ===== پیدا کردن فیلد ایمیل با روش‌های مختلف =====
         logger.info("🔍 جستجوی فیلد ایمیل...")
@@ -199,7 +202,7 @@ async def start_registration(update, email, password, username_prefix="user"):
 def submit_confirmation_code(driver, code):
     logger.info(f"🔢 ارسال کد تأیید: {code}")
     try:
-        wait = WebDriverWait(driver, 30)
+        wait = WebDriverWait(driver, 60)
         code_input = wait.until(EC.presence_of_element_located((By.NAME, "code")))
         code_input.clear()
         code_input.send_keys(code)
