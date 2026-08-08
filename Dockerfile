@@ -2,6 +2,7 @@ FROM python:3.11-slim
 
 ENV DEBIAN_FRONTEND=noninteractive
 
+# نصب وابستگی‌ها و کروم
 RUN apt-get update && apt-get install -y \
     wget \
     gnupg \
@@ -22,13 +23,13 @@ RUN apt-get update && apt-get install -y \
     libgtk-3-0 \
     libxss1 \
     fonts-liberation \
-    --no-install-recommends \
-    && rm -rf /var/lib/apt/lists/*
+    --no-install-recommends
 
+# دانلود و نصب کروم (با بررسی خطا)
 RUN wget -q https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb \
-    && dpkg -i google-chrome-stable_current_amd64.deb 2>/dev/null || true \
-    && apt-get install -f -y \
-    && rm google-chrome-stable_current_amd64.deb
+    && dpkg -i google-chrome-stable_current_amd64.deb || apt-get install -f -y \
+    && rm google-chrome-stable_current_amd64.deb \
+    && google-chrome --version  # برای تأیید نصب
 
 WORKDIR /app
 COPY requirements.txt .
