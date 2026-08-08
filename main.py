@@ -52,7 +52,6 @@ def get_driver():
     return driver
 
 def log_all_inputs(driver):
-    """لاگ کردن تمام input های صفحه برای دیباگ"""
     inputs = driver.find_elements(By.TAG_NAME, "input")
     logger.info(f"📋 تعداد input های صفحه: {len(inputs)}")
     for inp in inputs:
@@ -68,32 +67,25 @@ def take_screenshot(driver, name="screenshot.png"):
     try:
         screenshot = driver.get_screenshot_as_base64()
         logger.info(f"📸 اسکرین‌شات ذخیره شد: {name}")
-        # می‌توانید برای ذخیره در فایل:
-        # with open(name, "wb") as f:
-        #     f.write(base64.b64decode(screenshot))
     except Exception as e:
         logger.error(f"❌ خطا در گرفتن اسکرین‌شات: {str(e)}")
 
 def start_registration(email, password, username_prefix="user"):
     logger.info(f"📧 شروع ثبت‌نام با ایمیل: {email}")
     driver = None
+    username = None  # تعریف اولیه متغیر
     try:
         driver = get_driver()
         logger.info("🌐 باز کردن صفحه ثبت‌نام اینستاگرام...")
         driver.get("https://www.instagram.com/accounts/emailsignup/")
-        wait = WebDriverWait(driver, 20)
-        
-        # صبر برای لود شدن صفحه
         time.sleep(5)
         
-        # لاگ کردن تمام input ها برای دیباگ
         log_all_inputs(driver)
         
-        # تلاش برای پیدا کردن فیلد ایمیل با روش‌های مختلف
         logger.info("🔍 جستجوی فیلد ایمیل...")
         email_input = None
         
-        # روش ۱: با استفاده از JavaScript (مقاوم‌ترین روش)
+        # روش JavaScript
         try:
             email_input = driver.execute_script("""
                 return document.querySelector('input[name="emailOrPhone"]') || 
@@ -109,7 +101,6 @@ def start_registration(email, password, username_prefix="user"):
         except:
             pass
         
-        # روش ۲: اگر JavaScript کار نکرد، از WebDriverWait استفاده کن
         if not email_input:
             selectors = [
                 (By.NAME, "emailOrPhone"),
@@ -122,7 +113,7 @@ def start_registration(email, password, username_prefix="user"):
             ]
             for by, selector in selectors:
                 try:
-                    email_input = wait.until(EC.presence_of_element_located((by, selector)))
+                    email_input = WebDriverWait(driver, 5).until(EC.presence_of_element_located((by, selector)))
                     if email_input:
                         logger.info(f"✅ فیلد ایمیل با selector {selector} پیدا شد.")
                         break
@@ -134,12 +125,10 @@ def start_registration(email, password, username_prefix="user"):
             log_all_inputs(driver)
             raise Exception("فیلد ایمیل پیدا نشد. صفحه ممکن است تغییر کرده باشد.")
         
-        # پر کردن فرم با JavaScript (مقاوم‌تر از send_keys)
         logger.info("✏️ پر کردن فرم با JavaScript...")
         driver.execute_script("arguments[0].value = arguments[1];", email_input, email)
         driver.execute_script("arguments[0].dispatchEvent(new Event('input', { bubbles: true }));", email_input)
         
-        # پیدا کردن و پر کردن سایر فیلدها
         password_input = driver.execute_script("""
             return document.querySelector('input[type="password"]') || 
                    document.querySelector('input[name="password"]')
@@ -150,7 +139,6 @@ def start_registration(email, password, username_prefix="user"):
         else:
             raise Exception("فیلد رمز عبور پیدا نشد.")
         
-        # نام کامل
         full_name_input = driver.execute_script("""
             return document.querySelector('input[name="fullName"]') || 
                    document.querySelector('input[placeholder*="full" i]') ||
@@ -163,7 +151,6 @@ def start_registration(email, password, username_prefix="user"):
         else:
             logger.warning("⚠️ فیلد نام کامل پیدا نشد، ادامه می‌دهیم...")
         
-        # نام کاربری
         username_input = driver.execute_script("""
             return document.querySelector('input[name="username"]') || 
                    document.querySelector('input[placeholder*="user" i]')
@@ -174,8 +161,8 @@ def start_registration(email, password, username_prefix="user"):
             driver.execute_script("arguments[0].dispatchEvent(new Event('input', { bubbles: true }));", username_input)
         else:
             logger.warning("⚠️ فیلد نام کاربری پیدا نشد، ادامه می‌دهیم...")
+            username = f"{username_prefix}_{random.randint(10000, 99999)}"  # مقدار پیش‌فرض
         
-        # کلیک روی دکمه submit
         logger.info("🖱️ کلیک روی دکمه ارسال فرم...")
         submit_button = driver.execute_script("""
             return document.querySelector('button[type="submit"]') || 
@@ -185,7 +172,6 @@ def start_registration(email, password, username_prefix="user"):
         if submit_button:
             driver.execute_script("arguments[0].click();", submit_button)
         else:
-            # اگر دکمه پیدا نشد، از کلاس‌های رایج استفاده کن
             buttons = driver.find_elements(By.TAG_NAME, "button")
             for btn in buttons:
                 try:
