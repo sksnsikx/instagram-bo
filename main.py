@@ -5,6 +5,7 @@ import json
 import logging
 import base64
 import io
+import shutil
 from fastapi import FastAPI, Request
 from telegram import Update, ReplyKeyboardMarkup, KeyboardButton
 from telegram.ext import (
@@ -37,9 +38,36 @@ reset_keyboard = ReplyKeyboardMarkup(
     resize_keyboard=True
 )
 
+# ===================== پیدا کردن مسیر کروم =====================
+def get_chrome_path():
+    possible_paths = [
+        "/usr/bin/google-chrome",
+        "/usr/bin/google-chrome-stable",
+        "/usr/bin/chromium-browser",
+        "/usr/bin/chromium"
+    ]
+    for path in possible_paths:
+        if os.path.exists(path):
+            logger.info(f"✅ کروم در مسیر {path} پیدا شد.")
+            return path
+    # اگر پیدا نشد، از `shutil.which` استفاده کن
+    chrome = shutil.which("google-chrome") or shutil.which("google-chrome-stable") or shutil.which("chromium-browser")
+    if chrome:
+        logger.info(f"✅ کروم در مسیر {chrome} پیدا شد.")
+        return chrome
+    logger.error("❌ کروم پیدا نشد!")
+    return None
+
+# ===================== توابع Selenium =====================
 def get_driver():
+    logger.info("🔄 راه‌اندازی مرورگر کروم...")
     options = Options()
-    options.binary_location = "/usr/bin/google-chrome"
+    chrome_path = get_chrome_path()
+    if chrome_path:
+        options.binary_location = chrome_path
+    else:
+        raise Exception("کروم نصب نیست! لطفاً Dockerfile را بررسی کنید.")
+    
     options.add_argument("--headless=new")
     options.add_argument("--no-sandbox")
     options.add_argument("--disable-dev-shm-usage")
@@ -52,6 +80,7 @@ def get_driver():
     service = Service(ChromeDriverManager().install())
     driver = webdriver.Chrome(service=service, options=options)
     driver.execute_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
+    logger.info("✅ مرورگر آماده شد.")
     return driver
 
 def take_screenshot_base64(driver):
