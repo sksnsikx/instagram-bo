@@ -81,6 +81,35 @@ async def send_screenshot(update, driver, caption):
     else:
         await update.message.reply_text(f"⚠️ اسکرین‌شات گرفته نشد: {caption}")
 
+async def send_html_file(update, html_content, filename="page_source.html"):
+    """ارسال HTML صفحه به‌عنوان فایل در تلگرام"""
+    try:
+        html_bytes = html_content.encode('utf-8')
+        await update.message.reply_document(
+            document=io.BytesIO(html_bytes),
+            filename=filename,
+            caption="📄 HTML صفحه ثبت‌نام اینستاگرام - برای بررسی ساختار",
+            reply_markup=reset_keyboard
+        )
+        logger.info(f"📄 فایل HTML ارسال شد: {filename}")
+    except Exception as e:
+        logger.error(f"❌ خطا در ارسال HTML: {str(e)}")
+
+def log_all_inputs(driver):
+    """چاپ تمام inputهای صفحه در لاگ"""
+    inputs = driver.find_elements(By.TAG_NAME, "input")
+    logger.info(f"📋 تعداد input های صفحه: {len(inputs)}")
+    for i, inp in enumerate(inputs):
+        try:
+            name = inp.get_attribute("name")
+            type_ = inp.get_attribute("type")
+            placeholder = inp.get_attribute("placeholder")
+            value = inp.get_attribute("value")
+            autocomplete = inp.get_attribute("autocomplete")
+            logger.info(f"   [{i}] name={name}, type={type_}, placeholder={placeholder}, value={value}, autocomplete={autocomplete}")
+        except Exception as e:
+            logger.error(f"   خطا در خواندن input: {str(e)}")
+
 async def start_registration(update, email, password, username_prefix="user"):
     logger.info(f"📧 شروع ثبت‌نام با ایمیل: {email}")
     driver = None
@@ -91,59 +120,171 @@ async def start_registration(update, email, password, username_prefix="user"):
         driver.get("https://www.instagram.com/accounts/emailsignup/")
         time.sleep(5)
 
-        logger.info("🔍 جستجوی فیلد ایمیل...")
-        email_input = driver.execute_script("""
-            return document.querySelector('input[name="emailOrPhone"]') || 
-                   document.querySelector('input[type="email"]') ||
-                   document.querySelector('input[placeholder*="email" i]')
-        """)
-        if not email_input:
-            raise Exception("فیلد ایمیل پیدا نشد.")
+        # ===== ذخیره HTML صفحه =====
+        page_html = driver.page_source
+        with open("instagram_signup.html", "w", encoding="utf-8") as f:
+            f.write(page_html)
+        logger.info("📄 HTML صفحه در فایل instagram_signup.html ذخیره شد.")
+        
+        # ارسال HTML به تلگرام
+        await send_html_file(update, page_html, "instagram_signup.html")
 
+        # ===== لاگ کردن تمام inputها =====
+        log_all_inputs(driver)
+
+        # ===== پیدا کردن فیلد ایمیل با چندین روش =====
+        logger.info("🔍 جستجوی فیلد ایمیل...")
+        email_selectors = [
+            (By.NAME, "emailOrPhone"),
+            (By.CSS_SELECTOR, "input[type='email']"),
+            (By.CSS_SELECTOR, "input[name='emailOrPhone']"),
+            (By.CSS_SELECTOR, "input[placeholder*='Mobile number' i]"),
+            (By.CSS_SELECTOR, "input[placeholder*='email' i]"),
+            (By.CSS_SELECTOR, "input[placeholder*='phone' i]"),
+            (By.CSS_SELECTOR, "input[autocomplete='email']"),
+            (By.XPATH, "//input[@name='emailOrPhone']"),
+            (By.XPATH, "//input[@type='email']"),
+            (By.XPATH, "//input[contains(@placeholder, 'Mobile')]"),
+            (By.XPATH, "//input[contains(@placeholder, 'email')]"),
+        ]
+        email_input = None
+        for by, selector in email_selectors:
+            try:
+                email_input = WebDriverWait(driver, 5).until(EC.presence_of_element_located((by, selector)))
+                if email_input:
+                    logger.info(f"✅ فیلد ایمیل با selector '{selector}' پیدا شد.")
+                    break
+            except:
+                continue
+
+        if not email_input:
+            # روش JavaScript
+            logger.warning("⚠️ با سلکتورها پیدا نشد، استفاده از JavaScript...")
+            email_input = driver.execute_script("""
+                return document.querySelector('input[type="email"]') || 
+                       document.querySelector('input[name="emailOrPhone"]') ||
+                       document.querySelector('input[placeholder*="Mobile" i]') ||
+                       document.querySelector('input[placeholder*="email" i]') ||
+                       document.querySelector('input[placeholder*="phone" i]') ||
+                       document.querySelector('input[autocomplete="email"]')
+            """)
+
+        if not email_input:
+            await send_screenshot(update, driver, "❌ فیلد ایمیل پیدا نشد! HTML و اسکرین‌شات را ببینید.")
+            raise Exception("فیلد ایمیل پیدا نشد. فایل HTML را بررسی کنید.")
+
+        # پر کردن ایمیل
         driver.execute_script("arguments[0].value = arguments[1];", email_input, email)
         driver.execute_script("arguments[0].dispatchEvent(new Event('input', { bubbles: true }));", email_input)
 
-        password_input = driver.execute_script("""
-            return document.querySelector('input[type="password"]')
-        """)
+        # ===== پیدا کردن فیلد رمز عبور =====
+        logger.info("🔍 جستجوی فیلد رمز عبور...")
+        password_selectors = [
+            (By.NAME, "password"),
+            (By.CSS_SELECTOR, "input[type='password']"),
+            (By.XPATH, "//input[@type='password']"),
+            (By.XPATH, "//input[contains(@placeholder, 'Password')]"),
+        ]
+        password_input = None
+        for by, selector in password_selectors:
+            try:
+                password_input = WebDriverWait(driver, 5).until(EC.presence_of_element_located((by, selector)))
+                if password_input:
+                    logger.info(f"✅ فیلد رمز با selector '{selector}' پیدا شد.")
+                    break
+            except:
+                continue
         if password_input:
             driver.execute_script("arguments[0].value = arguments[1];", password_input, password)
             driver.execute_script("arguments[0].dispatchEvent(new Event('input', { bubbles: true }));", password_input)
 
-        full_name_input = driver.execute_script("""
-            return document.querySelector('input[name="fullName"]')
-        """)
+        # ===== پیدا کردن فیلد نام کامل =====
+        logger.info("🔍 جستجوی فیلد نام کامل...")
+        full_name_selectors = [
+            (By.NAME, "fullName"),
+            (By.CSS_SELECTOR, "input[name='fullName']"),
+            (By.CSS_SELECTOR, "input[placeholder*='Full' i]"),
+            (By.CSS_SELECTOR, "input[placeholder*='Name' i]"),
+            (By.XPATH, "//input[contains(@placeholder, 'Full')]"),
+            (By.XPATH, "//input[contains(@placeholder, 'Name')]"),
+        ]
+        full_name_input = None
+        for by, selector in full_name_selectors:
+            try:
+                full_name_input = WebDriverWait(driver, 5).until(EC.presence_of_element_located((by, selector)))
+                if full_name_input:
+                    logger.info(f"✅ فیلد نام کامل با selector '{selector}' پیدا شد.")
+                    break
+            except:
+                continue
         if full_name_input:
             full_name = "User " + str(random.randint(1000, 9999))
             driver.execute_script("arguments[0].value = arguments[1];", full_name_input, full_name)
             driver.execute_script("arguments[0].dispatchEvent(new Event('input', { bubbles: true }));", full_name_input)
 
-        username_input = driver.execute_script("""
-            return document.querySelector('input[name="username"]')
-        """)
+        # ===== پیدا کردن فیلد نام کاربری =====
+        logger.info("🔍 جستجوی فیلد نام کاربری...")
+        username_selectors = [
+            (By.NAME, "username"),
+            (By.CSS_SELECTOR, "input[name='username']"),
+            (By.CSS_SELECTOR, "input[placeholder*='Username' i]"),
+            (By.XPATH, "//input[contains(@placeholder, 'Username')]"),
+        ]
+        username_input = None
+        for by, selector in username_selectors:
+            try:
+                username_input = WebDriverWait(driver, 5).until(EC.presence_of_element_located((by, selector)))
+                if username_input:
+                    logger.info(f"✅ فیلد نام کاربری با selector '{selector}' پیدا شد.")
+                    break
+            except:
+                continue
         if username_input:
             username = f"{username_prefix}_{random.randint(10000, 99999)}"
             driver.execute_script("arguments[0].value = arguments[1];", username_input, username)
             driver.execute_script("arguments[0].dispatchEvent(new Event('input', { bubbles: true }));", username_input)
+        else:
+            username = f"{username_prefix}_{random.randint(10000, 99999)}"
+            logger.warning(f"⚠️ فیلد نام کاربری پیدا نشد، مقدار پیش‌فرض: {username}")
 
-        # ارسال اسکرین‌شات مرحله ۱
-        await send_screenshot(update, driver, "📝 مرحله ۱: فرم پر شد، در حال ارسال به اینستاگرام...")
+        # ===== کلیک روی دکمه ارسال =====
+        await send_screenshot(update, driver, "📝 مرحله ۱: فرم پر شد، در حال ارسال...")
 
         logger.info("🖱️ کلیک روی دکمه ارسال فرم...")
-        submit_button = driver.execute_script("""
-            return document.querySelector('button[type="submit"]')
-        """)
+        submit_selectors = [
+            (By.XPATH, "//button[@type='submit']"),
+            (By.CSS_SELECTOR, "button[type='submit']"),
+            (By.XPATH, "//button[contains(text(), 'Next')]"),
+            (By.XPATH, "//button[contains(text(), 'Sign up')]"),
+            (By.XPATH, "//button[contains(text(), 'Continue')]"),
+        ]
+        submit_button = None
+        for by, selector in submit_selectors:
+            try:
+                submit_button = WebDriverWait(driver, 5).until(EC.presence_of_element_located((by, selector)))
+                if submit_button:
+                    logger.info(f"✅ دکمه ارسال با selector '{selector}' پیدا شد.")
+                    break
+            except:
+                continue
         if submit_button:
             driver.execute_script("arguments[0].click();", submit_button)
         else:
-            driver.find_element(By.XPATH, "//button[@type='submit']").click()
+            # اگر دکمه پیدا نشد، همه دکمه‌ها را بررسی کن
+            buttons = driver.find_elements(By.TAG_NAME, "button")
+            for btn in buttons:
+                try:
+                    if "next" in btn.text.lower() or "sign up" in btn.text.lower() or "continue" in btn.text.lower():
+                        btn.click()
+                        break
+                except:
+                    pass
 
         time.sleep(5)
 
-        # ارسال اسکرین‌شات مرحله ۲
+        # ===== بررسی نتیجه =====
         await send_screenshot(update, driver, "⏳ مرحله ۲: در حال بررسی پاسخ اینستاگرام...")
 
-        # بررسی نتیجه
         try:
             code_input = driver.find_element(By.NAME, "code")
             if code_input:
