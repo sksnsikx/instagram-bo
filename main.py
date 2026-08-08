@@ -6,7 +6,7 @@ import logging
 import base64
 import io
 from fastapi import FastAPI, Request
-from telegram import Update, ReplyKeyboardMarkup, KeyboardButton, InputMediaPhoto
+from telegram import Update, ReplyKeyboardMarkup, KeyboardButton
 from telegram.ext import (
     Application, CommandHandler, MessageHandler, filters,
     ConversationHandler, CallbackContext
@@ -59,20 +59,16 @@ def get_driver():
     return driver
 
 def take_screenshot_base64(driver):
-    """گرفتن اسکرین‌شات و برگرداندن به صورت Base64"""
     try:
-        screenshot = driver.get_screenshot_as_base64()
-        return screenshot
+        return driver.get_screenshot_as_base64()
     except Exception as e:
         logger.error(f"❌ خطا در گرفتن اسکرین‌شات: {str(e)}")
         return None
 
 async def send_screenshot(update, driver, caption):
-    """ارسال اسکرین‌شات به تلگرام"""
     screenshot_base64 = take_screenshot_base64(driver)
     if screenshot_base64:
         try:
-            # تبدیل Base64 به بایت برای ارسال
             photo_bytes = base64.b64decode(screenshot_base64)
             await update.message.reply_photo(
                 photo=io.BytesIO(photo_bytes),
@@ -85,7 +81,7 @@ async def send_screenshot(update, driver, caption):
     else:
         await update.message.reply_text(f"⚠️ اسکرین‌شات گرفته نشد: {caption}")
 
-def start_registration(update, email, password, username_prefix="user"):
+async def start_registration(update, email, password, username_prefix="user"):
     logger.info(f"📧 شروع ثبت‌نام با ایمیل: {email}")
     driver = None
     username = None
@@ -95,7 +91,6 @@ def start_registration(update, email, password, username_prefix="user"):
         driver.get("https://www.instagram.com/accounts/emailsignup/")
         time.sleep(5)
 
-        # ===== پر کردن فرم =====
         logger.info("🔍 جستجوی فیلد ایمیل...")
         email_input = driver.execute_script("""
             return document.querySelector('input[name="emailOrPhone"]') || 
@@ -131,10 +126,9 @@ def start_registration(update, email, password, username_prefix="user"):
             driver.execute_script("arguments[0].value = arguments[1];", username_input, username)
             driver.execute_script("arguments[0].dispatchEvent(new Event('input', { bubbles: true }));", username_input)
 
-        # ارسال اسکرین‌شات بعد از پر کردن فرم
-        await send_screenshot(update, driver, "📝 مرحله ۱: فرم با موفقیت پر شد. در حال ارسال به اینستاگرام...")
+        # ارسال اسکرین‌شات مرحله ۱
+        await send_screenshot(update, driver, "📝 مرحله ۱: فرم پر شد، در حال ارسال به اینستاگرام...")
 
-        # ===== کلیک روی دکمه ارسال =====
         logger.info("🖱️ کلیک روی دکمه ارسال فرم...")
         submit_button = driver.execute_script("""
             return document.querySelector('button[type="submit"]')
@@ -146,31 +140,25 @@ def start_registration(update, email, password, username_prefix="user"):
 
         time.sleep(5)
 
-        # ارسال اسکرین‌شات بعد از کلیک
-        await send_screenshot(update, driver, "⏳ مرحله ۲: فرم ارسال شد. در حال بررسی پاسخ اینستاگرام...")
+        # ارسال اسکرین‌شات مرحله ۲
+        await send_screenshot(update, driver, "⏳ مرحله ۲: در حال بررسی پاسخ اینستاگرام...")
 
-        # ===== بررسی نتیجه =====
-        current_url = driver.current_url
-        logger.info(f"🔍 آدرس فعلی: {current_url}")
-
-        # ۱. بررسی وجود فیلد کد تأیید
+        # بررسی نتیجه
         try:
             code_input = driver.find_element(By.NAME, "code")
             if code_input:
                 logger.info("✅ صفحه کد تأیید پیدا شد! ایمیل با موفقیت ارسال شده است.")
-                await send_screenshot(update, driver, "✅ مرحله ۳: صفحه کد تأیید! ایمیل با موفقیت ارسال شد. منتظر کد از ایمیل خود باشید.")
+                await send_screenshot(update, driver, "✅ مرحله ۳: صفحه کد تأیید! ایمیل ارسال شد.")
                 return {"status": "waiting_for_code", "driver": driver, "username": username}
         except:
             pass
 
-        # ۲. بررسی پیام‌های خطا در صفحه
         page_text = driver.page_source.lower()
         if "try again" in page_text or "sorry" in page_text or "error" in page_text or "problem" in page_text:
-            await send_screenshot(update, driver, "❌ مرحله ۴: خطا از سمت اینستاگرام! (آی‌پی مسدود یا کپچا)")
+            await send_screenshot(update, driver, "❌ مرحله ۴: خطا از اینستاگرام (آی‌پی مسدود یا کپچا)")
             raise Exception("اینستاگرام خطا داده است (احتمالاً آی‌پی مسدود یا کپچا نیاز است).")
 
-        # ۳. اگر هیچ‌کدام نبود، یعنی صفحه عجیبی است
-        await send_screenshot(update, driver, "❓ مرحله ۵: صفحه ناشناخته! ثبت‌نام موفق نبوده است.")
+        await send_screenshot(update, driver, "❓ مرحله ۵: صفحه ناشناخته! ثبت‌نام موفق نبود.")
         raise Exception("صفحه ناشناخته! ثبت‌نام موفق نبوده است.")
 
     except Exception as e:
@@ -232,7 +220,7 @@ async def receive_password(update: Update, context: CallbackContext):
         "⏳ در حال ایجاد اکانت... لطفاً صبر کنید.",
         reply_markup=reset_keyboard
     )
-    result = start_registration(update, user_data[user_id]["email"], password)
+    result = await start_registration(update, user_data[user_id]["email"], password)
     if result["status"] == "waiting_for_code":
         user_data[user_id]["driver"] = result["driver"]
         user_data[user_id]["username"] = result["username"]
