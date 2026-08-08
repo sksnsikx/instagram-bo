@@ -33,7 +33,7 @@ bot_app = None
 def get_driver():
     logger.info("🔄 راه‌اندازی مرورگر کروم...")
     options = Options()
-    options.binary_location = "/usr/bin/google-chrome"  # مسیر دقیق کروم
+    options.binary_location = "/usr/bin/google-chrome"
     options.add_argument("--headless=new")
     options.add_argument("--no-sandbox")
     options.add_argument("--disable-dev-shm-usage")
@@ -53,19 +53,16 @@ def start_registration(email, password, username_prefix="user"):
     try:
         driver = get_driver()
         logger.info("🌐 باز کردن صفحه ثبت‌نام اینستاگرام...")
+        # مستقیماً به صفحه ثبت‌نام با ایمیل برو (بدون کلیک روی لینک)
         driver.get("https://www.instagram.com/accounts/emailsignup/")
-        time.sleep(3)
+        wait = WebDriverWait(driver, 20)
 
-        try:
-            logger.info("🔍 کلیک روی لینک 'Sign up with email'...")
-            email_link = driver.find_element(By.XPATH, "//a[contains(text(), 'Sign up with email')]")
-            email_link.click()
-            time.sleep(2)
-        except:
-            logger.warning("⚠️ لینک ایمیل پیدا نشد، احتمالاً قبلاً در صفحه ایمیل هستیم.")
+        # منتظر بمان تا فیلد ایمیل ظاهر شود
+        logger.info("✏️ منتظر لود شدن فرم ایمیل...")
+        email_input = wait.until(EC.presence_of_element_located((By.NAME, "emailOrPhone")))
+        email_input.send_keys(email)
 
-        logger.info("✏️ پر کردن فرم ایمیل و رمز...")
-        driver.find_element(By.NAME, "emailOrPhone").send_keys(email)
+        # پر کردن سایر فیلدها
         driver.find_element(By.NAME, "password").send_keys(password)
         driver.find_element(By.NAME, "fullName").send_keys("User " + str(random.randint(1000, 9999)))
         username = f"{username_prefix}_{random.randint(10000, 99999)}"
