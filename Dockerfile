@@ -1,12 +1,38 @@
 FROM python:3.11-slim
 
-# نصب کروم و درایور
+ENV DEBIAN_FRONTEND=noninteractive
+
+# نصب وابستگی‌ها و کروم (بدون apt-key)
 RUN apt-get update && apt-get install -y \
-    wget gnupg unzip \
-    && wget -q -O - https://dl-ssl.google.com/linux/linux_signing_key.pub | apt-key add - \
-    && echo "deb [arch=amd64] http://dl.google.com/linux/chrome/deb/ stable main" >> /etc/apt/sources.list.d/google.list \
-    && apt-get update && apt-get install -y google-chrome-stable \
+    wget \
+    gnupg \
+    unzip \
+    curl \
+    xvfb \
+    libxi6 \
+    libgconf-2-4 \
+    libx11-xcb1 \
+    libxcb1 \
+    libxcomposite1 \
+    libxcursor1 \
+    libxdamage1 \
+    libxi6 \
+    libxtst6 \
+    libnss3 \
+    libxrandr2 \
+    libasound2 \
+    libatk-bridge2.0-0 \
+    libgtk-3-0 \
+    libxss1 \
+    libappindicator1 \
+    fonts-liberation \
+    --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
+
+# دانلود و نصب مستقیم کروم (بدون apt-key)
+RUN wget -q https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb \
+    && dpkg -i google-chrome-stable_current_amd64.deb || apt-get install -f -y \
+    && rm google-chrome-stable_current_amd64.deb
 
 WORKDIR /app
 COPY requirements.txt .
