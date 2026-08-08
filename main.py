@@ -52,8 +52,7 @@ def get_driver():
     options.add_argument("--user-agent=Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.0.0 Safari/537.36")
     options.add_experimental_option("excludeSwitches", ["enable-automation"])
     options.add_experimental_option("useAutomationExtension", False)
-    # تنظیم pageLoadStrategy برای لود سریع‌تر
-    options.page_load_strategy = 'eager'  # منتظر DOMContentLoaded می‌ماند نه کل صفحه
+    options.page_load_strategy = 'eager'  # لود سریع‌تر صفحه
     service = Service(ChromeDriverManager().install())
     driver = webdriver.Chrome(service=service, options=options)
     driver.execute_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
@@ -92,44 +91,11 @@ async def start_registration(update, email, password, username_prefix="user"):
         logger.info("🌐 باز کردن صفحه ثبت‌نام اینستاگرام...")
         driver.get("https://www.instagram.com/accounts/emailsignup/")
         
-        # صبر برای لود شدن کامل صفحه (10 ثانیه)
-        logger.info("⏳ منتظر لود شدن کامل صفحه...")
-        time.sleep(10)
+        wait = WebDriverWait(driver, 45)
         
-        # استفاده از WebDriverWait با timeout 60 ثانیه
-        wait = WebDriverWait(driver, 60)
-        
-        # ===== پیدا کردن فیلد ایمیل با روش‌های مختلف =====
+        # ===== پیدا کردن فیلد ایمیل =====
         logger.info("🔍 جستجوی فیلد ایمیل...")
-        email_selectors = [
-            (By.NAME, "emailOrPhone"),
-            (By.CSS_SELECTOR, "input[name='emailOrPhone']"),
-            (By.XPATH, "//input[@name='emailOrPhone']"),
-            (By.XPATH, "//input[@type='email']"),
-            (By.CSS_SELECTOR, "input[type='email']"),
-        ]
-        email_input = None
-        for by, selector in email_selectors:
-            try:
-                email_input = wait.until(EC.presence_of_element_located((by, selector)))
-                if email_input:
-                    logger.info(f"✅ فیلد ایمیل با selector '{selector}' پیدا شد.")
-                    break
-            except Exception as e:
-                logger.warning(f"⚠️ selector '{selector}' کار نکرد: {str(e)}")
-                continue
-        
-        if not email_input:
-            # لاگ کردن تمام input ها برای دیباگ
-            inputs = driver.find_elements(By.TAG_NAME, "input")
-            logger.info(f"📋 تعداد input های صفحه: {len(inputs)}")
-            for inp in inputs:
-                try:
-                    logger.info(f"   - name: {inp.get_attribute('name')}, type: {inp.get_attribute('type')}, placeholder: {inp.get_attribute('placeholder')}")
-                except:
-                    pass
-            raise Exception("فیلد ایمیل پیدا نشد. صفحه ممکن است تغییر کرده باشد.")
-        
+        email_input = wait.until(EC.presence_of_element_located((By.NAME, "emailOrPhone")))
         email_input.clear()
         email_input.send_keys(email)
         logger.info("✅ فیلد ایمیل پر شد.")
@@ -162,19 +128,17 @@ async def start_registration(update, email, password, username_prefix="user"):
         
         # ===== پیدا کردن دکمه Submit =====
         logger.info("🖱️ جستجوی دکمه ارسال...")
-        # دکمه با role='button' و شامل span با متن 'Submit'
         submit_button = wait.until(EC.element_to_be_clickable((By.XPATH, "//div[@role='button']//span[text()='Submit']/..")))
         submit_button.click()
         logger.info("✅ دکمه ارسال کلیک شد.")
         
-        time.sleep(5)
+        time.sleep(3)
         
         # ارسال اسکرین‌شات مرحله ۲
         await send_screenshot(update, driver, "⏳ مرحله ۲: در حال بررسی پاسخ اینستاگرام...")
         
         # ===== بررسی نتیجه =====
         try:
-            # بررسی وجود فیلد کد تأیید
             code_input = driver.find_element(By.NAME, "code")
             if code_input:
                 logger.info("✅ صفحه کد تأیید پیدا شد! ایمیل با موفقیت ارسال شده است.")
@@ -183,7 +147,6 @@ async def start_registration(update, email, password, username_prefix="user"):
         except:
             pass
         
-        # بررسی خطاهای احتمالی
         page_text = driver.page_source.lower()
         if "try again" in page_text or "sorry" in page_text or "error" in page_text or "problem" in page_text:
             await send_screenshot(update, driver, "❌ مرحله ۴: خطا از اینستاگرام (آی‌پی مسدود یا کپچا)")
@@ -202,12 +165,11 @@ async def start_registration(update, email, password, username_prefix="user"):
 def submit_confirmation_code(driver, code):
     logger.info(f"🔢 ارسال کد تأیید: {code}")
     try:
-        wait = WebDriverWait(driver, 60)
+        wait = WebDriverWait(driver, 45)
         code_input = wait.until(EC.presence_of_element_located((By.NAME, "code")))
         code_input.clear()
         code_input.send_keys(code)
         time.sleep(1)
-        # پیدا کردن دکمه تأیید (معمولاً همان دکمه Submit)
         submit_button = driver.find_element(By.XPATH, "//div[@role='button']//span[text()='Submit']/..")
         submit_button.click()
         time.sleep(5)
