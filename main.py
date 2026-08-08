@@ -3,6 +3,7 @@ import time
 import random
 import json
 import logging
+import base64
 from fastapi import FastAPI, Request
 from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ConversationHandler, CallbackContext
@@ -39,6 +40,7 @@ def get_driver():
     options.add_argument("--disable-dev-shm-usage")
     options.add_argument("--disable-gpu")
     options.add_argument("--disable-blink-features=AutomationControlled")
+    options.add_argument("--user-agent=Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.0.0 Safari/537.36")
     options.add_experimental_option("excludeSwitches", ["enable-automation"])
     options.add_experimental_option("useAutomationExtension", False)
     service = Service(ChromeDriverManager().install())
@@ -47,36 +49,80 @@ def get_driver():
     logger.info("✅ مرورگر آماده شد.")
     return driver
 
+def take_screenshot(driver, name="screenshot.png"):
+    try:
+        screenshot = driver.get_screenshot_as_base64()
+        logger.info(f"📸 اسکرین‌شات ذخیره شد: {name}")
+        # برای ذخیره در لاگ (اختیاری)
+        # with open(name, "wb") as f:
+        #     f.write(base64.b64decode(screenshot))
+    except Exception as e:
+        logger.error(f"❌ خطا در گرفتن اسکرین‌شات: {str(e)}")
+
 def start_registration(email, password, username_prefix="user"):
     logger.info(f"📧 شروع ثبت‌نام با ایمیل: {email}")
     driver = None
     try:
         driver = get_driver()
         logger.info("🌐 باز کردن صفحه ثبت‌نام اینستاگرام...")
-        # مستقیماً به صفحه ثبت‌نام با ایمیل برو (بدون کلیک روی لینک)
         driver.get("https://www.instagram.com/accounts/emailsignup/")
-        wait = WebDriverWait(driver, 20)
+        wait = WebDriverWait(driver, 30)
 
-        # منتظر بمان تا فیلد ایمیل ظاهر شود
-        logger.info("✏️ منتظر لود شدن فرم ایمیل...")
-        email_input = wait.until(EC.presence_of_element_located((By.NAME, "emailOrPhone")))
+        # روش‌های مختلف برای پیدا کردن فیلد ایمیل
+        logger.info("✏️ جستجوی فیلد ایمیل...")
+        selectors = [
+            (By.NAME, "emailOrPhone"),
+            (By.CSS_SELECTOR, "input[name='emailOrPhone']"),
+            (By.CSS_SELECTOR, "input[type='email']"),
+            (By.XPATH, "//input[@name='emailOrPhone']"),
+            (By.XPATH, "//input[@type='email']"),
+        ]
+        email_input = None
+        for by, selector in selectors:
+            try:
+                email_input = wait.until(EC.presence_of_element_located((by, selector)))
+                if email_input:
+                    logger.info(f"✅ فیلد ایمیل با selector {selector} پیدا شد.")
+                    break
+            except:
+                continue
+
+        if not email_input:
+            take_screenshot(driver, "error_screenshot.png")
+            raise Exception("فیلد ایمیل پیدا نشد. صفحه ممکن است تغییر کرده باشد.")
+
         email_input.send_keys(email)
 
-        # پر کردن سایر فیلدها
-        driver.find_element(By.NAME, "password").send_keys(password)
-        driver.find_element(By.NAME, "fullName").send_keys("User " + str(random.randint(1000, 9999)))
+        # پیدا کردن سایر فیلدها به روش مشابه
+        password_input = driver.find_element(By.NAME, "password")
+        if not password_input:
+            password_input = driver.find_element(By.CSS_SELECTOR, "input[type='password']")
+        password_input.send_keys(password)
+
+        full_name_input = driver.find_element(By.NAME, "fullName")
+        if not full_name_input:
+            full_name_input = driver.find_element(By.CSS_SELECTOR, "input[name='fullName']")
+        full_name_input.send_keys("User " + str(random.randint(1000, 9999)))
+
+        username_input = driver.find_element(By.NAME, "username")
+        if not username_input:
+            username_input = driver.find_element(By.CSS_SELECTOR, "input[name='username']")
         username = f"{username_prefix}_{random.randint(10000, 99999)}"
-        driver.find_element(By.NAME, "username").send_keys(username)
+        username_input.send_keys(username)
 
         logger.info("🖱️ کلیک روی دکمه ارسال فرم...")
-        driver.find_element(By.XPATH, "//button[@type='submit']").click()
-        time.sleep(3)
+        submit_button = driver.find_element(By.XPATH, "//button[@type='submit']")
+        if not submit_button:
+            submit_button = driver.find_element(By.CSS_SELECTOR, "button[type='submit']")
+        submit_button.click()
+        time.sleep(5)
         logger.info("✅ فرم ارسال شد. منتظر دریافت کد از ایمیل هستیم...")
 
         return {"status": "waiting_for_code", "driver": driver, "username": username}
     except Exception as e:
         logger.error(f"❌ خطا در start_registration: {str(e)}")
         if driver:
+            take_screenshot(driver, "error_screenshot.png")
             driver.quit()
         return {"status": "error", "message": str(e)}
 
