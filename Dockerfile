@@ -29,7 +29,7 @@ RUN apt-get update && apt-get install -y \
 RUN wget -q https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb \
     && dpkg -i google-chrome-stable_current_amd64.deb || apt-get install -f -y \
     && rm google-chrome-stable_current_amd64.deb \
-    && google-chrome --version  # برای تأیید نصب
+    && google-chrome --version
 
 WORKDIR /app
 COPY requirements.txt .
