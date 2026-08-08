@@ -19,11 +19,9 @@ from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.chrome.service import Service
 from webdriver_manager.chrome import ChromeDriverManager
 
-# ===================== راه‌اندازی لاگ =====================
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-# ===================== تنظیمات =====================
 TELEGRAM_TOKEN = "8591528173:AAFNV8iJqUPuWDsCj7QATClk-qUU9GH-IKg"
 RAILWAY_PUBLIC_DOMAIN = os.getenv("RAILWAY_PUBLIC_DOMAIN", "https://instagram-bo-production.up.railway.app")
 WEBHOOK_URL = f"{RAILWAY_PUBLIC_DOMAIN}/webhook"
@@ -39,9 +37,7 @@ reset_keyboard = ReplyKeyboardMarkup(
     resize_keyboard=True
 )
 
-# ===================== توابع Selenium =====================
 def get_driver():
-    logger.info("🔄 راه‌اندازی مرورگر کروم...")
     options = Options()
     options.binary_location = "/usr/bin/google-chrome"
     options.add_argument("--headless=new")
@@ -56,42 +52,31 @@ def get_driver():
     service = Service(ChromeDriverManager().install())
     driver = webdriver.Chrome(service=service, options=options)
     driver.execute_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
-    logger.info("✅ مرورگر آماده شد.")
     return driver
 
 def take_screenshot_base64(driver):
     try:
         return driver.get_screenshot_as_base64()
-    except Exception as e:
-        logger.error(f"❌ خطا در گرفتن اسکرین‌شات: {str(e)}")
+    except:
         return None
 
 async def send_screenshot(update, driver, caption):
-    screenshot_base64 = take_screenshot_base64(driver)
-    if screenshot_base64:
+    b64 = take_screenshot_base64(driver)
+    if b64:
         try:
-            photo_bytes = base64.b64decode(screenshot_base64)
             await update.message.reply_photo(
-                photo=io.BytesIO(photo_bytes),
+                photo=io.BytesIO(base64.b64decode(b64)),
                 caption=caption,
                 reply_markup=reset_keyboard
             )
-            logger.info(f"📸 اسکرین‌شات ارسال شد: {caption}")
         except Exception as e:
-            logger.error(f"❌ خطا در ارسال اسکرین‌شات: {str(e)}")
-    else:
-        await update.message.reply_text(f"⚠️ اسکرین‌شات گرفته نشد: {caption}")
+            logger.error(f"❌ خطا در ارسال اسکرین‌شات: {e}")
 
-def find_element_with_multiple_selectors(driver, selectors, timeout=10):
+def find_element_with_multiple_selectors(driver, selectors, timeout=30):
     for by, selector in selectors:
         try:
-            element = WebDriverWait(driver, timeout).until(
-                EC.presence_of_element_located((by, selector))
-            )
-            logger.info(f"✅ المنت با selector '{selector}' پیدا شد.")
-            return element
-        except Exception as e:
-            logger.warning(f"⚠️ selector '{selector}' کار نکرد: {str(e)[:50]}")
+            return WebDriverWait(driver, timeout).until(EC.presence_of_element_located((by, selector)))
+        except:
             continue
     return None
 
@@ -101,12 +86,9 @@ async def start_registration(update, email, password, username_prefix="user"):
     username = None
     try:
         driver = get_driver()
-        logger.info("🌐 باز کردن صفحه ثبت‌نام اینستاگرام...")
         driver.get("https://www.instagram.com/accounts/emailsignup/")
-        
-        wait = WebDriverWait(driver, 60)
-        
-        # ===== پیدا کردن فیلد ایمیل =====
+        wait = WebDriverWait(driver, 120)
+
         logger.info("🔍 جستجوی فیلد ایمیل...")
         email_selectors = [
             (By.NAME, "emailOrPhone"),
@@ -114,112 +96,79 @@ async def start_registration(update, email, password, username_prefix="user"):
             (By.XPATH, "//input[@name='emailOrPhone']"),
             (By.XPATH, "//input[@type='email' or @name='emailOrPhone']"),
         ]
-        email_input = find_element_with_multiple_selectors(driver, email_selectors, timeout=60)
-        
+        email_input = find_element_with_multiple_selectors(driver, email_selectors, timeout=120)
         if not email_input:
             inputs = driver.find_elements(By.TAG_NAME, "input")
             for inp in inputs:
-                try:
-                    name = inp.get_attribute("name")
-                    if name in ["emailOrPhone", "email"]:
-                        email_input = inp
-                        logger.info(f"✅ فیلد ایمیل با name='{name}' پیدا شد.")
-                        break
-                except:
-                    pass
-        
+                if inp.get_attribute("name") in ["emailOrPhone", "email"]:
+                    email_input = inp
+                    break
         if not email_input:
-            await send_screenshot(update, driver, "❌ فیلد ایمیل پیدا نشد! صفحه را ببینید.")
-            inputs = driver.find_elements(By.TAG_NAME, "input")
-            logger.info(f"📋 تعداد input های صفحه: {len(inputs)}")
-            for inp in inputs:
-                try:
-                    logger.info(f"   - name: {inp.get_attribute('name')}, type: {inp.get_attribute('type')}")
-                except:
-                    pass
-            raise Exception("فیلد ایمیل پیدا نشد. صفحه ممکن است تغییر کرده باشد.")
-        
+            await send_screenshot(update, driver, "❌ فیلد ایمیل پیدا نشد!")
+            raise Exception("فیلد ایمیل پیدا نشد")
+
         email_input.clear()
         email_input.send_keys(email)
-        logger.info("✅ فیلد ایمیل پر شد.")
-        
-        # ===== سایر فیلدها =====
-        logger.info("🔍 جستجوی فیلد رمز عبور...")
+
         password_input = wait.until(EC.presence_of_element_located((By.NAME, "password")))
         password_input.clear()
         password_input.send_keys(password)
-        logger.info("✅ فیلد رمز عبور پر شد.")
-        
-        logger.info("🔍 جستجوی فیلد نام کامل...")
+
         full_name_input = wait.until(EC.presence_of_element_located((By.NAME, "fullName")))
         full_name_input.clear()
         full_name = "User " + str(random.randint(1000, 9999))
         full_name_input.send_keys(full_name)
-        logger.info(f"✅ فیلد نام کامل پر شد: {full_name}")
-        
-        logger.info("🔍 جستجوی فیلد نام کاربری...")
+
         username_input = wait.until(EC.presence_of_element_located((By.NAME, "username")))
         username_input.clear()
         username = f"{username_prefix}_{random.randint(10000, 99999)}"
         username_input.send_keys(username)
-        logger.info(f"✅ فیلد نام کاربری پر شد: {username}")
-        
-        # ارسال اسکرین‌شات مرحله ۱
-        await send_screenshot(update, driver, "📝 مرحله ۱: فرم پر شد، در حال ارسال به اینستاگرام...")
-        
-        # ===== دکمه Submit =====
-        logger.info("🖱️ جستجوی دکمه ارسال...")
+
+        await send_screenshot(update, driver, "📝 مرحله ۱: فرم پر شد")
+
         submit_button = wait.until(EC.element_to_be_clickable((By.XPATH, "//div[@role='button']//span[text()='Submit']/..")))
         submit_button.click()
-        logger.info("✅ دکمه ارسال کلیک شد.")
-        
         time.sleep(3)
-        
-        # ارسال اسکرین‌شات مرحله ۲
-        await send_screenshot(update, driver, "⏳ مرحله ۲: در حال بررسی پاسخ اینستاگرام...")
-        
-        # ===== بررسی نتیجه =====
+
+        await send_screenshot(update, driver, "⏳ مرحله ۲: در حال بررسی پاسخ")
+
         try:
             code_input = driver.find_element(By.NAME, "code")
             if code_input:
-                logger.info("✅ صفحه کد تأیید پیدا شد! ایمیل با موفقیت ارسال شده است.")
-                await send_screenshot(update, driver, "✅ مرحله ۳: صفحه کد تأیید! ایمیل ارسال شد.")
+                await send_screenshot(update, driver, "✅ مرحله ۳: صفحه کد تأیید")
                 return {"status": "waiting_for_code", "driver": driver, "username": username}
         except:
             pass
-        
+
         page_text = driver.page_source.lower()
-        if "try again" in page_text or "sorry" in page_text or "error" in page_text or "problem" in page_text:
-            await send_screenshot(update, driver, "❌ مرحله ۴: خطا از اینستاگرام (آی‌پی مسدود یا کپچا)")
-            raise Exception("اینستاگرام خطا داده است (احتمالاً آی‌پی مسدود یا کپچا نیاز است).")
-        
-        await send_screenshot(update, driver, "❓ مرحله ۵: صفحه ناشناخته! ثبت‌نام موفق نبود.")
-        raise Exception("صفحه ناشناخته! ثبت‌نام موفق نبوده است.")
-        
+        if "try again" in page_text or "sorry" in page_text or "error" in page_text:
+            await send_screenshot(update, driver, "❌ خطا از اینستاگرام")
+            raise Exception("خطا از اینستاگرام")
+
+        await send_screenshot(update, driver, "❓ صفحه ناشناخته")
+        raise Exception("صفحه ناشناخته")
+
     except Exception as e:
-        logger.error(f"❌ خطا در start_registration: {str(e)}")
+        logger.error(f"❌ خطا: {e}")
         if driver:
             await send_screenshot(update, driver, f"❌ خطا: {str(e)[:200]}")
             driver.quit()
         return {"status": "error", "message": str(e)}
 
 def submit_confirmation_code(driver, code):
-    logger.info(f"🔢 ارسال کد تأیید: {code}")
     try:
-        wait = WebDriverWait(driver, 60)
+        wait = WebDriverWait(driver, 120)
         code_input = wait.until(EC.presence_of_element_located((By.NAME, "code")))
         code_input.clear()
         code_input.send_keys(code)
         time.sleep(1)
-        submit_button = driver.find_element(By.XPATH, "//div[@role='button']//span[text()='Submit']/..")
-        submit_button.click()
+        driver.find_element(By.XPATH, "//div[@role='button']//span[text()='Submit']/..").click()
         time.sleep(5)
         cookies = driver.get_cookies()
         driver.quit()
-        logger.info("✅ کد تأیید شد و اکانت ساخته شد.")
         return {"status": "success", "cookies": cookies}
     except Exception as e:
-        logger.error(f"❌ خطا در submit_confirmation_code: {str(e)}")
+        logger.error(f"❌ خطا در تأیید کد: {e}")
         driver.quit()
         return {"status": "error", "message": str(e)}
 
@@ -230,8 +179,7 @@ async def start(update: Update, context: CallbackContext):
         user_data[user_id]["driver"].quit()
     user_data.pop(user_id, None)
     await update.message.reply_text(
-        "🤖 به ربات سازنده اکانت اینستاگرام خوش آمدید!\n"
-        "لطفاً ایمیل خود را وارد کنید:",
+        "🤖 به ربات سازنده اکانت اینستاگرام خوش آمدید!\nلطفاً ایمیل خود را وارد کنید:",
         reply_markup=reset_keyboard
     )
     return EMAIL
@@ -240,52 +188,36 @@ async def receive_email(update: Update, context: CallbackContext):
     email = update.message.text
     user_id = update.effective_user.id
     user_data[user_id] = {"email": email}
-    logger.info(f"📩 ایمیل دریافت شد از کاربر {user_id}: {email}")
-    await update.message.reply_text(
-        "✅ ایمیل دریافت شد. حالا رمز عبور مورد نظر را وارد کنید:",
-        reply_markup=reset_keyboard
-    )
+    logger.info(f"📩 ایمیل دریافت شد: {email}")
+    await update.message.reply_text("✅ ایمیل دریافت شد. حالا رمز عبور را وارد کنید:", reply_markup=reset_keyboard)
     return PASSWORD
 
 async def receive_password(update: Update, context: CallbackContext):
     password = update.message.text
     user_id = update.effective_user.id
     user_data[user_id]["password"] = password
-    logger.info(f"🔑 رمز عبور دریافت شد از کاربر {user_id}")
-    await update.message.reply_text(
-        "⏳ در حال ایجاد اکانت... لطفاً صبر کنید.",
-        reply_markup=reset_keyboard
-    )
+    logger.info(f"🔑 رمز عبور دریافت شد")
+    await update.message.reply_text("⏳ در حال ایجاد اکانت...", reply_markup=reset_keyboard)
     result = await start_registration(update, user_data[user_id]["email"], password)
     if result["status"] == "waiting_for_code":
         user_data[user_id]["driver"] = result["driver"]
         user_data[user_id]["username"] = result["username"]
-        logger.info(f"⏳ منتظر کد تأیید برای کاربر {user_id}, ایمیل: {user_data[user_id]['email']}")
         await update.message.reply_text(
-            f"📧 کد تأیید به ایمیل {user_data[user_id]['email']} ارسال شد.\n"
-            "لطفاً کد ۶ رقمی را وارد کنید:",
+            f"📧 کد تأیید به ایمیل {user_data[user_id]['email']} ارسال شد.\nلطفاً کد ۶ رقمی را وارد کنید:",
             reply_markup=reset_keyboard
         )
         return CONFIRM_CODE
     else:
-        logger.error(f"❌ خطا در ثبت‌نام کاربر {user_id}: {result.get('message', 'نامشخص')}")
-        await update.message.reply_text(
-            f"❌ خطا: {result.get('message', 'نامشخص')}",
-            reply_markup=reset_keyboard
-        )
+        await update.message.reply_text(f"❌ خطا: {result.get('message', 'نامشخص')}", reply_markup=reset_keyboard)
         user_data.pop(user_id, None)
         return ConversationHandler.END
 
 async def receive_code(update: Update, context: CallbackContext):
     code = update.message.text
     user_id = update.effective_user.id
-    logger.info(f"📥 کد تأیید دریافت شد از کاربر {user_id}: {code}")
     driver = user_data[user_id].get("driver")
     if not driver:
-        await update.message.reply_text(
-            "❌ نشست منقضی شده. دوباره با /start شروع کنید.",
-            reply_markup=reset_keyboard
-        )
+        await update.message.reply_text("❌ نشست منقضی شده. دوباره با /start شروع کنید.", reply_markup=reset_keyboard)
         user_data.pop(user_id, None)
         return ConversationHandler.END
     result = submit_confirmation_code(driver, code)
@@ -294,20 +226,13 @@ async def receive_code(update: Update, context: CallbackContext):
         password = user_data[user_id]["password"]
         email = user_data[user_id]["email"]
         await update.message.reply_text(
-            f"✅ اکانت با موفقیت ساخته شد!\n"
-            f"👤 نام کاربری: `{username}`\n"
-            f"🔑 رمز عبور: `{password}`\n"
-            f"📧 ایمیل: `{email}`\n"
-            f"(کوکی‌ها نیز در سرور ذخیره شدند)",
+            f"✅ اکانت ساخته شد!\n👤 {username}\n🔑 {password}\n📧 {email}",
             reply_markup=reset_keyboard
         )
         with open(f"account_{username}.json", "w") as f:
             json.dump({"username": username, "password": password, "email": email, "cookies": result["cookies"]}, f)
     else:
-        await update.message.reply_text(
-            f"❌ خطا در تأیید کد: {result.get('message', 'نامشخص')}",
-            reply_markup=reset_keyboard
-        )
+        await update.message.reply_text(f"❌ خطا: {result.get('message', 'نامشخص')}", reply_markup=reset_keyboard)
     user_data.pop(user_id, None)
     return ConversationHandler.END
 
@@ -316,10 +241,7 @@ async def reset(update: Update, context: CallbackContext):
     if user_id in user_data and "driver" in user_data[user_id]:
         user_data[user_id]["driver"].quit()
     user_data.pop(user_id, None)
-    await update.message.reply_text(
-        "🔄 شروع دوباره... لطفاً ایمیل خود را وارد کنید:",
-        reply_markup=reset_keyboard
-    )
+    await update.message.reply_text("🔄 شروع دوباره... ایمیل را وارد کنید:", reply_markup=reset_keyboard)
     return EMAIL
 
 async def cancel(update: Update, context: CallbackContext):
@@ -327,53 +249,44 @@ async def cancel(update: Update, context: CallbackContext):
     if user_id in user_data and "driver" in user_data[user_id]:
         user_data[user_id]["driver"].quit()
     user_data.pop(user_id, None)
-    await update.message.reply_text(
-        "❌ عملیات لغو شد.",
-        reply_markup=reset_keyboard
-    )
+    await update.message.reply_text("❌ لغو شد.", reply_markup=reset_keyboard)
     return ConversationHandler.END
 
 def setup_bot():
-    application = Application.builder().token(TELEGRAM_TOKEN).build()
-    conv_handler = ConversationHandler(
+    app_bot = Application.builder().token(TELEGRAM_TOKEN).build()
+    conv = ConversationHandler(
         entry_points=[CommandHandler("start", start)],
         states={
             EMAIL: [MessageHandler(filters.TEXT & ~filters.COMMAND, receive_email)],
             PASSWORD: [MessageHandler(filters.TEXT & ~filters.COMMAND, receive_password)],
             CONFIRM_CODE: [MessageHandler(filters.TEXT & ~filters.COMMAND, receive_code)],
         },
-        fallbacks=[
-            CommandHandler("cancel", cancel),
-            CommandHandler("reset", reset),
-            MessageHandler(filters.Regex("^🔄 شروع دوباره$"), reset),
-        ],
+        fallbacks=[CommandHandler("cancel", cancel), MessageHandler(filters.Regex("^🔄 شروع دوباره$"), reset)],
     )
-    application.add_handler(conv_handler)
-    return application
+    app_bot.add_handler(conv)
+    return app_bot
 
-# ===================== FastAPI =====================
 @app.post("/webhook")
 async def webhook(request: Request):
     global bot_app
     req = await request.json()
     if bot_app is None:
-        return {"ok": False, "error": "Bot not initialized"}
+        return {"ok": False}
     await bot_app.process_update(Update.de_json(req, bot_app.bot))
     return {"ok": True}
 
 @app.get("/")
 def root():
-    return {"message": "ربات اینستاگرام ساز در حال اجرا است"}
+    return {"message": "ربات در حال اجرا است"}
 
 @app.on_event("startup")
 async def startup_event():
     global bot_app
-    logger.info("🚀 راه‌اندازی ربات تلگرام...")
     bot_app = setup_bot()
     await bot_app.initialize()
     await bot_app.start()
     await bot_app.bot.set_webhook(WEBHOOK_URL)
-    logger.info(f"✅ Webhook تنظیم شد: {WEBHOOK_URL}")
+    logger.info(f"✅ Webhook: {WEBHOOK_URL}")
 
 @app.on_event("shutdown")
 async def shutdown_event():
@@ -381,4 +294,3 @@ async def shutdown_event():
     if bot_app:
         await bot_app.stop()
         await bot_app.shutdown()
-        logger.info("🛑 ربات متوقف شد.")
