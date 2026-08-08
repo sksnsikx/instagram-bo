@@ -4,6 +4,7 @@ import random
 import json
 import logging
 import base64
+import re
 from fastapi import FastAPI, Request
 from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ConversationHandler, CallbackContext
@@ -14,6 +15,7 @@ from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.chrome.service import Service
 from webdriver_manager.chrome import ChromeDriverManager
+from selenium.common.exceptions import TimeoutException, NoSuchElementException
 
 # ===================== راه‌اندازی لاگ =====================
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -49,11 +51,24 @@ def get_driver():
     logger.info("✅ مرورگر آماده شد.")
     return driver
 
+def log_all_inputs(driver):
+    """لاگ کردن تمام input های صفحه برای دیباگ"""
+    inputs = driver.find_elements(By.TAG_NAME, "input")
+    logger.info(f"📋 تعداد input های صفحه: {len(inputs)}")
+    for inp in inputs:
+        try:
+            name = inp.get_attribute("name")
+            type_ = inp.get_attribute("type")
+            placeholder = inp.get_attribute("placeholder")
+            logger.info(f"   - name: {name}, type: {type_}, placeholder: {placeholder}")
+        except:
+            pass
+
 def take_screenshot(driver, name="screenshot.png"):
     try:
         screenshot = driver.get_screenshot_as_base64()
         logger.info(f"📸 اسکرین‌شات ذخیره شد: {name}")
-        # برای ذخیره در لاگ (اختیاری)
+        # می‌توانید برای ذخیره در فایل:
         # with open(name, "wb") as f:
         #     f.write(base64.b64decode(screenshot))
     except Exception as e:
@@ -66,58 +81,123 @@ def start_registration(email, password, username_prefix="user"):
         driver = get_driver()
         logger.info("🌐 باز کردن صفحه ثبت‌نام اینستاگرام...")
         driver.get("https://www.instagram.com/accounts/emailsignup/")
-        wait = WebDriverWait(driver, 30)
-
-        # روش‌های مختلف برای پیدا کردن فیلد ایمیل
-        logger.info("✏️ جستجوی فیلد ایمیل...")
-        selectors = [
-            (By.NAME, "emailOrPhone"),
-            (By.CSS_SELECTOR, "input[name='emailOrPhone']"),
-            (By.CSS_SELECTOR, "input[type='email']"),
-            (By.XPATH, "//input[@name='emailOrPhone']"),
-            (By.XPATH, "//input[@type='email']"),
-        ]
+        wait = WebDriverWait(driver, 20)
+        
+        # صبر برای لود شدن صفحه
+        time.sleep(5)
+        
+        # لاگ کردن تمام input ها برای دیباگ
+        log_all_inputs(driver)
+        
+        # تلاش برای پیدا کردن فیلد ایمیل با روش‌های مختلف
+        logger.info("🔍 جستجوی فیلد ایمیل...")
         email_input = None
-        for by, selector in selectors:
-            try:
-                email_input = wait.until(EC.presence_of_element_located((by, selector)))
-                if email_input:
-                    logger.info(f"✅ فیلد ایمیل با selector {selector} پیدا شد.")
-                    break
-            except:
-                continue
-
+        
+        # روش ۱: با استفاده از JavaScript (مقاوم‌ترین روش)
+        try:
+            email_input = driver.execute_script("""
+                return document.querySelector('input[name="emailOrPhone"]') || 
+                       document.querySelector('input[type="email"]') ||
+                       document.querySelector('input[placeholder*="email" i]') ||
+                       document.querySelector('input[placeholder*="phone" i]') ||
+                       document.querySelector('input[autocomplete="email"]') ||
+                       document.querySelector('input[autocomplete="username"]') ||
+                       document.querySelector('input[type="text"]:not([name*="user"]):not([name*="full"])')
+            """)
+            if email_input:
+                logger.info("✅ فیلد ایمیل با JavaScript پیدا شد.")
+        except:
+            pass
+        
+        # روش ۲: اگر JavaScript کار نکرد، از WebDriverWait استفاده کن
+        if not email_input:
+            selectors = [
+                (By.NAME, "emailOrPhone"),
+                (By.CSS_SELECTOR, "input[type='email']"),
+                (By.CSS_SELECTOR, "input[name='emailOrPhone']"),
+                (By.CSS_SELECTOR, "input[placeholder*='email' i]"),
+                (By.CSS_SELECTOR, "input[autocomplete='email']"),
+                (By.XPATH, "//input[@name='emailOrPhone']"),
+                (By.XPATH, "//input[@type='email']"),
+            ]
+            for by, selector in selectors:
+                try:
+                    email_input = wait.until(EC.presence_of_element_located((by, selector)))
+                    if email_input:
+                        logger.info(f"✅ فیلد ایمیل با selector {selector} پیدا شد.")
+                        break
+                except:
+                    continue
+        
         if not email_input:
             take_screenshot(driver, "error_screenshot.png")
+            log_all_inputs(driver)
             raise Exception("فیلد ایمیل پیدا نشد. صفحه ممکن است تغییر کرده باشد.")
-
-        email_input.send_keys(email)
-
-        # پیدا کردن سایر فیلدها به روش مشابه
-        password_input = driver.find_element(By.NAME, "password")
-        if not password_input:
-            password_input = driver.find_element(By.CSS_SELECTOR, "input[type='password']")
-        password_input.send_keys(password)
-
-        full_name_input = driver.find_element(By.NAME, "fullName")
-        if not full_name_input:
-            full_name_input = driver.find_element(By.CSS_SELECTOR, "input[name='fullName']")
-        full_name_input.send_keys("User " + str(random.randint(1000, 9999)))
-
-        username_input = driver.find_element(By.NAME, "username")
-        if not username_input:
-            username_input = driver.find_element(By.CSS_SELECTOR, "input[name='username']")
-        username = f"{username_prefix}_{random.randint(10000, 99999)}"
-        username_input.send_keys(username)
-
+        
+        # پر کردن فرم با JavaScript (مقاوم‌تر از send_keys)
+        logger.info("✏️ پر کردن فرم با JavaScript...")
+        driver.execute_script("arguments[0].value = arguments[1];", email_input, email)
+        driver.execute_script("arguments[0].dispatchEvent(new Event('input', { bubbles: true }));", email_input)
+        
+        # پیدا کردن و پر کردن سایر فیلدها
+        password_input = driver.execute_script("""
+            return document.querySelector('input[type="password"]') || 
+                   document.querySelector('input[name="password"]')
+        """)
+        if password_input:
+            driver.execute_script("arguments[0].value = arguments[1];", password_input, password)
+            driver.execute_script("arguments[0].dispatchEvent(new Event('input', { bubbles: true }));", password_input)
+        else:
+            raise Exception("فیلد رمز عبور پیدا نشد.")
+        
+        # نام کامل
+        full_name_input = driver.execute_script("""
+            return document.querySelector('input[name="fullName"]') || 
+                   document.querySelector('input[placeholder*="full" i]') ||
+                   document.querySelector('input[placeholder*="name" i]')
+        """)
+        if full_name_input:
+            full_name = "User " + str(random.randint(1000, 9999))
+            driver.execute_script("arguments[0].value = arguments[1];", full_name_input, full_name)
+            driver.execute_script("arguments[0].dispatchEvent(new Event('input', { bubbles: true }));", full_name_input)
+        else:
+            logger.warning("⚠️ فیلد نام کامل پیدا نشد، ادامه می‌دهیم...")
+        
+        # نام کاربری
+        username_input = driver.execute_script("""
+            return document.querySelector('input[name="username"]') || 
+                   document.querySelector('input[placeholder*="user" i]')
+        """)
+        if username_input:
+            username = f"{username_prefix}_{random.randint(10000, 99999)}"
+            driver.execute_script("arguments[0].value = arguments[1];", username_input, username)
+            driver.execute_script("arguments[0].dispatchEvent(new Event('input', { bubbles: true }));", username_input)
+        else:
+            logger.warning("⚠️ فیلد نام کاربری پیدا نشد، ادامه می‌دهیم...")
+        
+        # کلیک روی دکمه submit
         logger.info("🖱️ کلیک روی دکمه ارسال فرم...")
-        submit_button = driver.find_element(By.XPATH, "//button[@type='submit']")
-        if not submit_button:
-            submit_button = driver.find_element(By.CSS_SELECTOR, "button[type='submit']")
-        submit_button.click()
+        submit_button = driver.execute_script("""
+            return document.querySelector('button[type="submit"]') || 
+                   document.querySelector('button[type="button"]') ||
+                   document.querySelector('button[class*="submit"]')
+        """)
+        if submit_button:
+            driver.execute_script("arguments[0].click();", submit_button)
+        else:
+            # اگر دکمه پیدا نشد، از کلاس‌های رایج استفاده کن
+            buttons = driver.find_elements(By.TAG_NAME, "button")
+            for btn in buttons:
+                try:
+                    if "next" in btn.text.lower() or "continue" in btn.text.lower() or "sign up" in btn.text.lower():
+                        btn.click()
+                        break
+                except:
+                    pass
+        
         time.sleep(5)
         logger.info("✅ فرم ارسال شد. منتظر دریافت کد از ایمیل هستیم...")
-
+        
         return {"status": "waiting_for_code", "driver": driver, "username": username}
     except Exception as e:
         logger.error(f"❌ خطا در start_registration: {str(e)}")
@@ -131,8 +211,9 @@ def submit_confirmation_code(driver, code):
     try:
         wait = WebDriverWait(driver, 30)
         code_input = wait.until(EC.presence_of_element_located((By.NAME, "code")))
-        code_input.send_keys(code)
-        logger.info("🖱️ کلیک روی دکمه تأیید کد...")
+        driver.execute_script("arguments[0].value = arguments[1];", code_input, code)
+        driver.execute_script("arguments[0].dispatchEvent(new Event('input', { bubbles: true }));", code_input)
+        time.sleep(1)
         driver.find_element(By.XPATH, "//button[@type='submit']").click()
         time.sleep(5)
         cookies = driver.get_cookies()
@@ -188,7 +269,6 @@ async def receive_code(update: Update, context: CallbackContext):
     logger.info(f"📥 کد تأیید دریافت شد از کاربر {user_id}: {code}")
     driver = user_data[user_id].get("driver")
     if not driver:
-        logger.warning(f"❌ نشست کاربر {user_id} منقضی شده.")
         await update.message.reply_text("❌ نشست منقضی شده. دوباره با /start شروع کنید.")
         return ConversationHandler.END
     result = submit_confirmation_code(driver, code)
@@ -196,7 +276,6 @@ async def receive_code(update: Update, context: CallbackContext):
         username = user_data[user_id]["username"]
         password = user_data[user_id]["password"]
         email = user_data[user_id]["email"]
-        logger.info(f"✅ اکانت ساخته شد برای کاربر {user_id}: {username}")
         await update.message.reply_text(
             f"✅ اکانت با موفقیت ساخته شد!\n"
             f"👤 نام کاربری: `{username}`\n"
@@ -207,14 +286,12 @@ async def receive_code(update: Update, context: CallbackContext):
         with open(f"account_{username}.json", "w") as f:
             json.dump({"username": username, "password": password, "email": email, "cookies": result["cookies"]}, f)
     else:
-        logger.error(f"❌ خطا در تأیید کد کاربر {user_id}: {result.get('message', 'نامشخص')}")
         await update.message.reply_text(f"❌ خطا در تأیید کد: {result.get('message', 'نامشخص')}")
     user_data.pop(user_id, None)
     return ConversationHandler.END
 
 async def cancel(update: Update, context: CallbackContext):
     user_id = update.effective_user.id
-    logger.info(f"🚫 لغو عملیات توسط کاربر {user_id}")
     if user_id in user_data and "driver" in user_data[user_id]:
         user_data[user_id]["driver"].quit()
     user_data.pop(user_id, None)
@@ -241,7 +318,6 @@ async def webhook(request: Request):
     global bot_app
     req = await request.json()
     if bot_app is None:
-        logger.error("❌ ربات هنوز مقداردهی نشده است.")
         return {"ok": False, "error": "Bot not initialized"}
     await bot_app.process_update(Update.de_json(req, bot_app.bot))
     return {"ok": True}
