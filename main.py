@@ -90,12 +90,43 @@ async def start_registration(update, email, password, username_prefix="user"):
         logger.info("🌐 باز کردن صفحه ثبت‌نام اینستاگرام...")
         driver.get("https://www.instagram.com/accounts/emailsignup/")
         
-        # استفاده از WebDriverWait برای اطمینان از لود شدن صفحه
-        wait = WebDriverWait(driver, 20)
+        # استفاده از WebDriverWait با timeout 30 ثانیه
+        wait = WebDriverWait(driver, 30)
         
-        # ===== پیدا کردن فیلد ایمیل =====
+        # صبر برای لود شدن کامل صفحه
+        time.sleep(5)
+        
+        # ===== پیدا کردن فیلد ایمیل با روش‌های مختلف =====
         logger.info("🔍 جستجوی فیلد ایمیل...")
-        email_input = wait.until(EC.presence_of_element_located((By.NAME, "emailOrPhone")))
+        email_selectors = [
+            (By.NAME, "emailOrPhone"),
+            (By.CSS_SELECTOR, "input[name='emailOrPhone']"),
+            (By.XPATH, "//input[@name='emailOrPhone']"),
+            (By.XPATH, "//input[@type='email']"),
+            (By.CSS_SELECTOR, "input[type='email']"),
+        ]
+        email_input = None
+        for by, selector in email_selectors:
+            try:
+                email_input = wait.until(EC.presence_of_element_located((by, selector)))
+                if email_input:
+                    logger.info(f"✅ فیلد ایمیل با selector '{selector}' پیدا شد.")
+                    break
+            except Exception as e:
+                logger.warning(f"⚠️ selector '{selector}' کار نکرد: {str(e)}")
+                continue
+        
+        if not email_input:
+            # لاگ کردن تمام input ها برای دیباگ
+            inputs = driver.find_elements(By.TAG_NAME, "input")
+            logger.info(f"📋 تعداد input های صفحه: {len(inputs)}")
+            for inp in inputs:
+                try:
+                    logger.info(f"   - name: {inp.get_attribute('name')}, type: {inp.get_attribute('type')}, placeholder: {inp.get_attribute('placeholder')}")
+                except:
+                    pass
+            raise Exception("فیلد ایمیل پیدا نشد. صفحه ممکن است تغییر کرده باشد.")
+        
         email_input.clear()
         email_input.send_keys(email)
         logger.info("✅ فیلد ایمیل پر شد.")
